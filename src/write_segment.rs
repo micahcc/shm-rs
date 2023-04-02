@@ -6,13 +6,10 @@
       unevently distributing that between the header and body (or assuming some ratio)
 */
 use crate::constants::{
-    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET,
-    MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
+    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, PRIMARY_HEADER_SIZE,
 };
 use crate::error::Error;
-use crate::mem_fd::MemFd;
 use crate::shared_write_segment::SharedWriteSegment;
-use crate::utils::{compute_crc32, now_micros};
 use crate::wire_message::WireMessage;
 use crate::write_interface::WriteInterface;
 use log::{error, info, warn};
@@ -129,7 +126,6 @@ mod tests {
             "hello",
             memory_size as usize, /* bytes */
             n_messages,           /* n_messages */
-            SegmentPurpose::PubSub,
         )
         .expect("Should succeed");
 
@@ -142,7 +138,7 @@ mod tests {
 
             // now write a message
             let mem1 = buffer1
-                .alloc_body_slice(body_size as usize)
+                .alloc_slice(body_size as usize)
                 .expect("Should be ok");
             for i in 0..body_size {
                 mem1[i as usize] = i as u8;
@@ -164,15 +160,12 @@ mod tests {
             // seq should be filled with 2
             assert!(slice[16..24] == (2 as u64).to_ne_bytes());
 
-            // head offset + size should be zero
+            // timestamp should be non-zero
+            assert!(slice[24..32] != (0 as u32).to_ne_bytes());
+
+            // offset + size should be zero
             assert!(slice[32..36] == (0 as u32).to_ne_bytes());
             assert!(slice[36..40] == (0 as u32).to_ne_bytes());
-
-            // body offset should be right after the main header
-            assert!(slice[44..48] == (body_start as u32).to_ne_bytes());
-
-            // body size should be ok
-            assert!(slice[48..52] == (body_size as u32).to_ne_bytes());
 
             // (2) segment header
             // seq should be filled with 0 (NO WRITING ALLOWED)
@@ -224,9 +217,9 @@ mod tests {
             }
 
             // writing to body should fill the body
-            let head1 = buffer.alloc_head_slice(1).expect("Should be ok");
+            let head1 = buffer.alloc_slice(1).expect("Should be ok");
             head1[0] = 19;
-            let body1 = buffer.alloc_body_slice(1).expect("Should be ok");
+            let body1 = buffer.alloc_slice(1).expect("Should be ok");
             body1[0] = 17;
             buffer.complete_write();
 
@@ -269,13 +262,13 @@ mod tests {
 
             // writing to body should fill the body, 3 bytes should roll around
             // and start again at the beginning
-            let body1 = buffer.alloc_body_slice(3).expect("Should be ok");
+            let body1 = buffer.alloc_slice(3).expect("Should be ok");
             body1[0] = 27;
             body1[1] = 28;
             body1[2] = 29;
 
             // 1 byte should finish off
-            let head1 = buffer.alloc_head_slice(1).expect("Should be ok");
+            let head1 = buffer.alloc_slice(1).expect("Should be ok");
             head1[0] = 23;
             buffer.complete_write();
 
@@ -317,7 +310,6 @@ mod tests {
                     "hello",
                     memory_size as usize, /* bytes */
                     n_messages,           /* n_messages */
-                    SegmentPurpose::PubSub,
                 )
                 .expect("Should succeed");
 
@@ -325,7 +317,7 @@ mod tests {
                     // now write a message
                     let mut buffer1 = segment.get_write_buffer().expect("Should be good");
                     let mem1 = buffer1
-                        .alloc_body_slice(body_size as usize)
+                        .alloc_slice(body_size as usize)
                         .expect("Should be ok");
                     for i in 0..body_size {
                         mem1[i as usize] = i as u8;

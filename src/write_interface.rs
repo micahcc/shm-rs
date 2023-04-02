@@ -5,10 +5,7 @@
  * 2. It would be nice not to tie users down with first allocating a chunk, then
       unevently distributing that between the header and body (or assuming some ratio)
 */
-use crate::constants::{
-    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET,
-    MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
-};
+use crate::constants::MSG_POS_SEQ;
 use crate::error::Error;
 use crate::shared_write_segment::SharedWriteSegment;
 use log::{error, info, warn};
@@ -83,7 +80,7 @@ impl WriteInterface {
         // - nothing should write to a region with a sequence of 0.
         // - nothing should read from a region with a sequence of 0
         let mut seg = self.pos_segment.lock().unwrap();
-        let ptr = seg.allocate_block(self.meta_position, false, len)?;
+        let ptr = seg.allocate_block(self.meta_position, len)?;
         unsafe {
             return Ok(std::slice::from_raw_parts_mut(ptr, len));
         }

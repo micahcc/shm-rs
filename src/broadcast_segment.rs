@@ -5,7 +5,7 @@ use crate::WriteInterface;
 use crate::WriteSegment;
 use std::os::unix::net::UnixListener;
 
-struct BroadcastSegment {
+pub struct BroadcastSegment {
     // socket
     listener: UnixListener,
 
@@ -29,5 +29,9 @@ impl BroadcastSegment {
 
     pub fn get_write_buffer(&mut self) -> Result<WriteInterface, Error> {
         return self.segment.get_write_buffer();
+    }
+
+    pub fn complete_write(buffer: WriteInterface) {
+        buffer.complete_write();
     }
 }

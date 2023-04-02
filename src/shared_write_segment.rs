@@ -6,16 +6,13 @@
       unevently distributing that between the header and body (or assuming some ratio)
 */
 use crate::constants::{
-    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET,
-    MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
+    MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET, MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP,
+    PRIMARY_HEADER_SIZE,
 };
 use crate::error::Error;
 use crate::mem_fd::MemFd;
 use crate::utils::{compute_crc32, now_micros};
-use crate::wire_message::WireMessage;
 use log::{error, info, warn};
-use rand::Rng;
-use std::sync::{Arc, Mutex};
 
 // We may need to share the same write memory between many users, so keep a lock on the
 // actual memory and store it in SharedWriteSegment
@@ -136,7 +133,6 @@ impl SharedWriteSegment {
     pub fn allocate_block(
         &mut self,
         alloc_meta_pos: usize,
-        is_body: bool,
         alloc_len: usize,
     ) -> Result<*mut u8, Error> {
         if alloc_len > self.mem_fd.len() {
