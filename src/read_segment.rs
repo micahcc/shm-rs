@@ -54,7 +54,7 @@ impl UniqueReadSegment {
         let mut best_index: u32 = u32::MAX;
         for i in 0..self.n_messages {
             let pos = PRIMARY_HEADER_SIZE + MESSAGE_HEADER_SIZE * (i as usize);
-            let read_seq = self.mem_fd.read_u64_at(pos);
+            let read_seq = self.mem_fd.read_u64_at(pos + MSG_POS_SEQ);
             if read_seq >= desired_seq && read_seq < best_seq {
                 best_seq = read_seq;
                 best_index = i;
@@ -189,7 +189,7 @@ impl ReadSegment {
 
             for i in 0..n_messages {
                 let meta_pos = PRIMARY_HEADER_SIZE + MESSAGE_HEADER_SIZE * (i as usize);
-                let read_seq = segment.mem_fd.read_u64_at(meta_pos);
+                let read_seq = segment.mem_fd.read_u64_at(meta_pos + MSG_POS_SEQ);
                 max_seq = u64::max(max_seq, read_seq);
             }
         }
