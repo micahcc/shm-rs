@@ -1,4 +1,4 @@
-use crate::errors::SocketError;
+use crate::error::Error;
 use std::ffi::CString;
 use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
@@ -60,7 +60,7 @@ impl MemFd {
         return self.addr.offset(start as isize);
     }
 
-    pub fn from_owned_fd(file_fd: OwnedFd) -> Result<MemFd, SocketError> {
+    pub fn from_owned_fd(file_fd: OwnedFd) -> Result<MemFd, Error> {
         //let memory_overhead = HEADER_SIZE + MESSAGE_HEADER_SIZE * (n_messages as usize);
         //let max_message_size = (n_bytes - memory_overhead) / (n_messages as usize);
 
@@ -68,7 +68,7 @@ impl MemFd {
             // seek to end, find length
             let n_bytes = libc::lseek(file_fd.as_raw_fd(), 0, libc::SEEK_END);
             if n_bytes < 0 {
-                return Err(SocketError::new(format!(
+                return Err(Error::new(format!(
                     "Failed to seed to end: {}",
                     std::io::Error::last_os_error()
                 )));
@@ -85,7 +85,7 @@ impl MemFd {
             );
 
             if addr as i64 <= 0 {
-                return Err(SocketError::new(format!(
+                return Err(Error::new(format!(
                     "Failed to map memory: {}",
                     std::io::Error::last_os_error()
                 )));
@@ -99,12 +99,12 @@ impl MemFd {
         }
     }
 
-    pub fn new(name: &str, n_bytes: usize) -> Result<MemFd, SocketError> {
+    pub fn new(name: &str, n_bytes: usize) -> Result<MemFd, Error> {
         unsafe {
             let topic_c_str = CString::new(name).unwrap();
             let raw_file_fd = libc::memfd_create(topic_c_str.into_raw(), 0);
             if raw_file_fd < 0 {
-                return Err(SocketError::new(format!(
+                return Err(Error::new(format!(
                     "Failed to construct memfd: {}",
                     std::io::Error::last_os_error()
                 )));
@@ -112,7 +112,7 @@ impl MemFd {
             let file_fd = OwnedFd::from_raw_fd(raw_file_fd);
 
             if libc::ftruncate(file_fd.as_raw_fd(), n_bytes as i64) < 0 {
-                return Err(SocketError::new(format!(
+                return Err(Error::new(format!(
                     "Failed to resize memfd: {}",
                     std::io::Error::last_os_error()
                 )));
@@ -129,7 +129,7 @@ impl MemFd {
             );
 
             if addr as i64 <= 0 {
-                return Err(SocketError::new(format!(
+                return Err(Error::new(format!(
                     "Failed to map memory: {}",
                     std::io::Error::last_os_error()
                 )));

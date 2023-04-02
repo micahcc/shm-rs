@@ -9,7 +9,7 @@ use crate::constants::{
     ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET,
     MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
 };
-use crate::errors::SocketError;
+use crate::error::Error;
 use crate::mem_fd::MemFd;
 use crate::utils::compute_crc32;
 use log::{debug, info};
@@ -37,7 +37,7 @@ struct UniqueReadSegment {
 }
 
 impl UniqueReadSegment {
-    fn new(fd: OwnedFd) -> Result<UniqueReadSegment, SocketError> {
+    fn new(fd: OwnedFd) -> Result<UniqueReadSegment, Error> {
         let mem_fd = MemFd::from_owned_fd(fd)?;
 
         // read header
@@ -165,7 +165,7 @@ impl ReadSegment {
         }
     }
 
-    pub fn new(shared_fd: OwnedFd, data: &[u8], latch: bool) -> Result<ReadSegment, SocketError> {
+    pub fn new(shared_fd: OwnedFd, data: &[u8], latch: bool) -> Result<ReadSegment, Error> {
         info!("Data Len: {}", data.len());
         assert!(data.len() == 8);
         let wire_segment_uid = u64::from_ne_bytes(data[0..8].try_into().unwrap());
@@ -179,7 +179,7 @@ impl ReadSegment {
             // read header
             segment_uid = segment.mem_fd.read_u64_at(ABS_POS_SEGMENT_UID);
             if wire_segment_uid != segment_uid {
-                return Err(SocketError::new(format!(
+                return Err(Error::new(format!(
                     "Topic id sent through socket ({}) \
                     does not match the segment_uid in the shared mem: {}",
                     wire_segment_uid, segment_uid
