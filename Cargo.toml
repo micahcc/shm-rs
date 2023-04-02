@@ -6,5 +6,25 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-env_logger = "0.10.0"
+libc = "0.2.138"
+
+# for sending the shared memory over sockets
+sendfd = "0.4.3"
+
+# for validating that we don't read invalid memory, technically the way we rw
+# to memory should guarantee this, but nice to be safe and crc is fast
+crc = "3.0.0"
+
+# for generating unique ids for connections
+rand = "0.8.5"
+
+# for logging
 log = "0.4.17"
+
+# for logging in the binaries
+env_logger = "0.10.0"
+
+# for ctrl-c handlin in the binaries
+ctrlc = "3.2.4"
+
+

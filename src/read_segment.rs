@@ -6,21 +6,20 @@
       unevently distributing that between the header and body (or assuming some ratio)
 */
 use crate::constants::{
-    GPOS_N_MESSAGES, GPOS_PURPOSE, GPOS_SEGMENT_UID, MESSAGE_HEADER_SIZE, PRIMARY_HEADER_SIZE,
+    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET,
+    MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
 };
 use crate::errors::SocketError;
 use crate::mem_fd::MemFd;
 use crate::utils::compute_crc32;
-use log::info;
+use log::{debug, info};
 use std::os::fd::OwnedFd;
 use std::sync::{Arc, Mutex};
 
 pub struct Inbound {
     pub seq: u64,
-    pub head: Vec<u8>,
     pub body: Vec<u8>,
     pub publish_micros: u64,
-    pub prev_seq: u64,
 }
 
 enum ReadResult {
@@ -49,12 +48,7 @@ impl UniqueReadSegment {
         });
     }
 
-    fn read_message(
-        &self,
-        desired_seq: u64,
-        head_out: &mut Vec<u8>,
-        body_out: &mut Vec<u8>,
-    ) -> ReadResult {
+    fn read_message(&self, desired_seq: u64, out: &mut Vec<u8>) -> ReadResult {
         info!("Looking for {}", desired_seq);
         let mut best_seq = u64::MAX; // lowest seq >= desired_seq
         let mut best_index: u32 = u32::MAX;
@@ -75,37 +69,20 @@ impl UniqueReadSegment {
 
         info!("Best: {}", best_seq);
         let pos = PRIMARY_HEADER_SIZE + MESSAGE_HEADER_SIZE * (best_index as usize);
-        let publish_micros = self.mem_fd.read_u64_at(pos + 8);
-        let head_offset = self.mem_fd.read_u32_at(pos + 16) as usize;
-        let head_size = self.mem_fd.read_u32_at(pos + 20) as usize;
-        let head_crc = self.mem_fd.read_u32_at(pos + 24);
-        let body_offset = self.mem_fd.read_u32_at(pos + 28) as usize;
-        let body_size = self.mem_fd.read_u32_at(pos + 32) as usize;
-        let body_crc = self.mem_fd.read_u32_at(pos + 36);
+        let publish_micros = self.mem_fd.read_u64_at(pos + MSG_POS_TIMESTAMP);
+        let offset = self.mem_fd.read_u32_at(pos + MSG_POS_OFFSET) as usize;
+        let size = self.mem_fd.read_u32_at(pos + MSG_POS_SIZE) as usize;
+        let crc = self.mem_fd.read_u32_at(pos + MSG_POS_CRC);
 
-        let head_end = head_offset + head_size;
-        if head_end > self.mem_fd.len() as usize {
+        let end = offset + size;
+        if end > self.mem_fd.len() as usize {
             // out of bound, sequence must have been overwritten
-            info!(
-                "Extremely rare, received header offset: {}, header size: {}, \
+            debug!(
+                "Extremely rare, received offset: {}, size: {}, \
                     buffer size: {}, this would lead to out of bounds, skipping and \
                     trying again",
-                head_offset,
-                head_size,
-                self.mem_fd.len()
-            );
-            return ReadResult::Retry;
-        }
-
-        let body_end = body_offset + body_size;
-        if body_end > self.mem_fd.len() as usize {
-            // out of bound, sequence must have been overwritten
-            info!(
-                "Extremely rare, received header offset: {}, header size: {}, \
-                    buffer size: {}, this would lead to out of bounds, skipping and \
-                    trying again",
-                body_offset,
-                body_size,
+                offset,
+                size,
                 self.mem_fd.len()
             );
             return ReadResult::Retry;
@@ -113,11 +90,8 @@ impl UniqueReadSegment {
 
         // ready to our output vectors
         let slice = self.mem_fd.slice();
-        head_out.resize(head_size, 0);
-        head_out.copy_from_slice(&slice[head_offset..head_end]);
-
-        body_out.resize(body_size, 0);
-        body_out.copy_from_slice(&slice[body_offset..body_end]);
+        out.resize(size, 0);
+        out.copy_from_slice(&slice[offset..end]);
 
         // check sequence again to ensure nothing changed
         // compiler fence is overkill but *potentially* necessary to ensure our
@@ -127,15 +101,15 @@ impl UniqueReadSegment {
 
         // CRC32 below can be removed once stability is reached
         let re_seq = self.mem_fd.read_u64_at(pos);
-        let re_head_crc = compute_crc32(&head_out);
-        let re_body_crc = compute_crc32(&body_out);
-        if re_seq == best_seq && re_head_crc == head_crc && re_body_crc == body_crc {
+        let re_crc = compute_crc32(&out);
+        if re_seq == best_seq && re_crc == crc {
+            // success!
             return ReadResult::Success(re_seq, publish_micros);
         }
 
         // sequence changed while we were reading, redo the whole thing
         // again
-        info!("Stuff changed, try again");
+        debug!("Stuff changed, try again");
         return ReadResult::Retry;
     }
 }
@@ -164,8 +138,7 @@ impl ReadSegment {
 
         // this is kind of gross, probably the most expensive operation in here
         // will be the allocation, so keep the same vectors through mutliple attempts
-        let mut head_out: Vec<u8> = vec![];
-        let mut body_out: Vec<u8> = vec![];
+        let mut body: Vec<u8> = vec![];
 
         // loop because we might read and then discover that the data has changed
         // mid read
@@ -173,7 +146,7 @@ impl ReadSegment {
         info!("Prev: {}", prev_seq);
         loop {
             let pos_segment = self.pos_segment.lock().unwrap();
-            match pos_segment.read_message(prev_seq, &mut head_out, &mut body_out) {
+            match pos_segment.read_message(prev_seq, &mut body) {
                 ReadResult::Nothing => {
                     return None;
                 }
@@ -184,30 +157,27 @@ impl ReadSegment {
                     self.read_seq = seq + 1;
                     return Some(Inbound {
                         seq: seq,
-                        head: head_out,
-                        body: body_out,
+                        body: body,
                         publish_micros: publish_micros,
-                        prev_seq: prev_seq,
                     });
                 }
             }
         }
     }
 
-    pub fn new(shared_fd: OwnedFd, data: &[u8]) -> Result<ReadSegment, SocketError> {
+    pub fn new(shared_fd: OwnedFd, data: &[u8], latch: bool) -> Result<ReadSegment, SocketError> {
         info!("Data Len: {}", data.len());
         assert!(data.len() == 8);
         let wire_segment_uid = u64::from_ne_bytes(data[0..8].try_into().unwrap());
         let segment_rc = Arc::new(Mutex::new(UniqueReadSegment::new(shared_fd)?));
 
-        let mut first_seq = 2;
+        let mut max_seq = 0;
         let segment_uid;
         let n_messages;
-        let purpose;
         {
             let segment = segment_rc.lock().unwrap();
             // read header
-            segment_uid = segment.mem_fd.read_u64_at(GPOS_SEGMENT_UID);
+            segment_uid = segment.mem_fd.read_u64_at(ABS_POS_SEGMENT_UID);
             if wire_segment_uid != segment_uid {
                 return Err(SocketError::new(format!(
                     "Topic id sent through socket ({}) \
@@ -215,31 +185,28 @@ impl ReadSegment {
                     wire_segment_uid, segment_uid
                 )));
             }
-            n_messages = segment.mem_fd.read_u32_at(GPOS_N_MESSAGES);
-            purpose = match segment.mem_fd.read_u8_at(GPOS_PURPOSE) {
-                0 => SegmentPurpose::Topology,
-                1 => SegmentPurpose::PubSub,
-                i => {
-                    let slice = segment.mem_fd.slice();
-                    let header = &slice[0..PRIMARY_HEADER_SIZE];
-                    unreachable!(
-                        "Invalid purpose provided for id: {:?}: {}, full header: {:?}",
-                        data, i, header
-                    );
-                }
-            };
+            n_messages = segment.mem_fd.read_u32_at(ABS_POS_N_MESSAGES);
 
             for i in 0..n_messages {
                 let meta_pos = PRIMARY_HEADER_SIZE + MESSAGE_HEADER_SIZE * (i as usize);
                 let read_seq = segment.mem_fd.read_u64_at(meta_pos);
-                first_seq = u64::max(first_seq, read_seq);
+                max_seq = u64::max(max_seq, read_seq);
             }
+        }
+
+        // must always start >= 2 because 0, 1 are sentinals
+        let first_seq;
+        if !latch {
+            // no latching, start after last seq
+            first_seq = u64::max(max_seq + 1, 2);
+        } else {
+            // latching, start at last
+            first_seq = u64::max(max_seq, 2);
         }
 
         return Ok(ReadSegment {
             segment_uid: segment_uid,
             pos_segment: segment_rc,
-            purpose: purpose,
             read_seq: first_seq,
         });
     }

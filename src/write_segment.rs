@@ -6,8 +6,8 @@
       unevently distributing that between the header and body (or assuming some ratio)
 */
 use crate::constants::{
-    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_OFFSET, MSG_POS_SEQ,
-    MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
+    ABS_POS_N_MESSAGES, ABS_POS_SEGMENT_UID, MESSAGE_HEADER_SIZE, MSG_POS_CRC, MSG_POS_OFFSET,
+    MSG_POS_SEQ, MSG_POS_SIZE, MSG_POS_TIMESTAMP, PRIMARY_HEADER_SIZE,
 };
 use crate::errors::SocketError;
 use crate::mem_fd::MemFd;
@@ -120,8 +120,7 @@ impl UniqueWriteSegment {
         // compute and write CRC32
         let end = offset + size;
         let crc = compute_crc32(&self.mem_fd.slice()[offset..end]);
-        self.mem_fd
-            .write_u32_at(meta_position + MSG_POS_CRC, head_crc);
+        self.mem_fd.write_u32_at(meta_position + MSG_POS_CRC, crc);
 
         // write timestamp
         self.mem_fd
@@ -301,7 +300,7 @@ impl Drop for WriteBuffer {
     /// published.
     fn drop(&mut self) {
         let mut seg = self.pos_segment.lock().unwrap();
-        let read_seq = self.mem_fd.read_u64_at(self.meta_position + MSG_POS_SEQ);
+        let read_seq = seg.mem_fd.read_u64_at(self.meta_position + MSG_POS_SEQ);
         if read_seq == 0 {
             // this went unpublished
             warn!("Sequence {} was never published", self.seq);
