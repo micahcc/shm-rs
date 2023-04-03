@@ -2,7 +2,6 @@ use crate::read_segment::ReadSegment;
 use crate::Error;
 use log::{error, warn};
 use sendfd::RecvWithFd;
-use std::io::prelude::*;
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
