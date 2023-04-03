@@ -165,10 +165,7 @@ impl ReadSegment {
         }
     }
 
-    pub fn new(shared_fd: OwnedFd, data: &[u8], latch: bool) -> Result<ReadSegment, Error> {
-        info!("Data Len: {}", data.len());
-        assert!(data.len() == 8);
-        let wire_segment_uid = u64::from_ne_bytes(data[0..8].try_into().unwrap());
+    pub fn new(shared_fd: OwnedFd, latch: bool) -> Result<ReadSegment, Error> {
         let segment_rc = Arc::new(Mutex::new(UniqueReadSegment::new(shared_fd)?));
 
         let mut max_seq = 0;
@@ -178,13 +175,6 @@ impl ReadSegment {
             let segment = segment_rc.lock().unwrap();
             // read header
             segment_uid = segment.mem_fd.read_u64_at(ABS_POS_SEGMENT_UID);
-            if wire_segment_uid != segment_uid {
-                return Err(Error::new(format!(
-                    "Topic id sent through socket ({}) \
-                    does not match the segment_uid in the shared mem: {}",
-                    wire_segment_uid, segment_uid
-                )));
-            }
             n_messages = segment.mem_fd.read_u32_at(ABS_POS_N_MESSAGES);
 
             for i in 0..n_messages {

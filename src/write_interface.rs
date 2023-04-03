@@ -32,14 +32,14 @@ pub struct WriteInterface {
 
     // memory we'll write to, we want to keep this entire block alive while write
     // buffer is alive (because we have an unsafe pointer)
-    pub pos_segment: Arc<Mutex<SharedWriteSegment>>,
+    pub shared_segment: Arc<Mutex<SharedWriteSegment>>,
 }
 
 impl Drop for WriteInterface {
     /// Ensures that any memory associated with the WriteInterface was actually
     /// published.
     fn drop(&mut self) {
-        let mut seg = self.pos_segment.lock().unwrap();
+        let mut seg = self.shared_segment.lock().unwrap();
         let read_seq = seg.mem_fd.read_u64_at(self.meta_position + MSG_POS_SEQ);
         if read_seq == 0 {
             // this went unpublished
@@ -79,7 +79,7 @@ impl WriteInterface {
         // - we wrote 0 into the sequence and invalidated the CRC
         // - nothing should write to a region with a sequence of 0.
         // - nothing should read from a region with a sequence of 0
-        let mut seg = self.pos_segment.lock().unwrap();
+        let mut seg = self.shared_segment.lock().unwrap();
         let ptr = seg.allocate_block(self.meta_position, len)?;
         unsafe {
             return Ok(std::slice::from_raw_parts_mut(ptr, len));
@@ -87,7 +87,7 @@ impl WriteInterface {
     }
 
     pub fn complete_write(self) {
-        let mut seg = self.pos_segment.lock().unwrap();
+        let mut seg = self.shared_segment.lock().unwrap();
         seg.complete_write(self.meta_position, self.seq);
     }
 }

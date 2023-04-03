@@ -14,6 +14,7 @@ use crate::wire_message::WireMessage;
 use crate::write_interface::WriteInterface;
 use log::{error, info, warn};
 use rand::Rng;
+use std::os::fd::OwnedFd;
 use std::sync::{Arc, Mutex};
 
 // Because I don't want to do defragmentation I'm going to fix the number
@@ -42,7 +43,7 @@ use std::sync::{Arc, Mutex};
 pub struct WriteSegment {
     pub segment_uid: u64,
 
-    pos_segment: Arc<Mutex<SharedWriteSegment>>,
+    shared_segment: Arc<Mutex<SharedWriteSegment>>,
 
     next_seq: u64,
 }
@@ -72,7 +73,7 @@ impl WriteSegment {
 
         return Ok(WriteSegment {
             segment_uid: segment_uid,
-            pos_segment: segment_rc,
+            shared_segment: segment_rc,
             next_seq: 2,
         });
     }
@@ -81,29 +82,23 @@ impl WriteSegment {
         let position: usize;
         let write_seq: u64;
         {
-            let mut pos_segment = self.pos_segment.lock().unwrap();
-            position = pos_segment.start_write()?;
+            let mut shared_segment = self.shared_segment.lock().unwrap();
+            position = shared_segment.start_write()?;
             write_seq = self.next_seq;
             self.next_seq += 1;
         }
 
         return Ok(WriteInterface {
-            pos_segment: self.pos_segment.clone(),
+            shared_segment: self.shared_segment.clone(),
             segment_uid: self.segment_uid,
             meta_position: position,
             seq: write_seq,
         });
     }
 
-    pub fn to_wire(&self) -> WireMessage {
-        let pos_segment = self.pos_segment.lock().unwrap();
-        let data = self.segment_uid.to_ne_bytes().to_vec();
-        info!("Sending {} bytes", data.len());
-        let fds = vec![pos_segment.mem_fd.to_owned_fd()];
-        return WireMessage {
-            data: data,
-            fds: fds,
-        };
+    pub fn to_owned_fd(&self) -> OwnedFd {
+        let mut shared_segment = self.shared_segment.lock().unwrap();
+        return shared_segment.to_owned_fd();
     }
 }
 
@@ -147,8 +142,8 @@ mod tests {
             buffer1.complete_write();
 
             // check the header shows buffer1 filled;
-            let pos_segment = segment.pos_segment.lock().unwrap();
-            let slice = pos_segment.mem_fd.slice();
+            let shared_segment = segment.shared_segment.lock().unwrap();
+            let slice = shared_segment.mem_fd.slice();
 
             // segment_uid should be first
             assert!(slice[0..8] == segment.segment_uid.to_ne_bytes());
@@ -181,8 +176,8 @@ mod tests {
         }
 
         {
-            let pos_segment = segment.pos_segment.lock().unwrap();
-            let slice = pos_segment.mem_fd.slice();
+            let shared_segment = segment.shared_segment.lock().unwrap();
+            let slice = shared_segment.mem_fd.slice();
             // now that we failed to write the second message, the seq should be returned to 1
             // (2) segment header
             // seq should be back to 1, since we didn't ever finish it
@@ -201,8 +196,8 @@ mod tests {
         {
             let mut buffer = segment.get_write_buffer().expect("Should be good");
             {
-                let pos_segment = segment.pos_segment.lock().unwrap();
-                let slice = pos_segment.mem_fd.slice();
+                let shared_segment = segment.shared_segment.lock().unwrap();
+                let slice = shared_segment.mem_fd.slice();
 
                 // since we're using it, message 2 should have seq of 0
                 assert!(slice[56..64] == (0 as u64).to_ne_bytes());
@@ -226,8 +221,8 @@ mod tests {
             // head offset should be first body position
             // head size should be 1
             {
-                let pos_segment = segment.pos_segment.lock().unwrap();
-                let slice = pos_segment.mem_fd.slice();
+                let shared_segment = segment.shared_segment.lock().unwrap();
+                let slice = shared_segment.mem_fd.slice();
 
                 assert!(slice[72..76] == (body_start as u32).to_ne_bytes()); // head offset
                 assert!(slice[76..80] == (1 as u32).to_ne_bytes()); // head size
@@ -245,8 +240,8 @@ mod tests {
         {
             let mut buffer = segment.get_write_buffer().expect("Should be good");
             {
-                let pos_segment = segment.pos_segment.lock().unwrap();
-                let slice = pos_segment.mem_fd.slice();
+                let shared_segment = segment.shared_segment.lock().unwrap();
+                let slice = shared_segment.mem_fd.slice();
 
                 // since we're using it, message 1 should have seq of 0
                 assert!(slice[16..24] == (0 as u64).to_ne_bytes());
@@ -275,8 +270,8 @@ mod tests {
             // head offset should be first body position
             // head size should be 1
             {
-                let pos_segment = segment.pos_segment.lock().unwrap();
-                let slice = pos_segment.mem_fd.slice();
+                let shared_segment = segment.shared_segment.lock().unwrap();
+                let slice = shared_segment.mem_fd.slice();
 
                 // body offset should be body_start
                 // body size should be 3
@@ -326,8 +321,8 @@ mod tests {
                     buffer1.complete_write();
 
                     // check the header shows buffer1 filled;
-                    let pos_segment = segment.pos_segment.lock().unwrap();
-                    let _slice = pos_segment.mem_fd.slice();
+                    let shared_segment = segment.shared_segment.lock().unwrap();
+                    let _slice = shared_segment.mem_fd.slice();
                 }
             }
         }

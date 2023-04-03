@@ -13,6 +13,7 @@ use crate::error::Error;
 use crate::mem_fd::MemFd;
 use crate::utils::{compute_crc32, now_micros};
 use log::{error, info, warn};
+use std::os::fd::OwnedFd;
 
 // We may need to share the same write memory between many users, so keep a lock on the
 // actual memory and store it in SharedWriteSegment
@@ -224,5 +225,9 @@ impl SharedWriteSegment {
         unsafe {
             return Ok(self.mem_fd.ptr_to(start));
         }
+    }
+
+    pub fn to_owned_fd(&self) -> OwnedFd {
+        return self.mem_fd.to_owned_fd();
     }
 }
